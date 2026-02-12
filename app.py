@@ -7,21 +7,21 @@ import torch.nn.functional as F
 import pandas as pd
 
 # -----------------------------------
-# CONFIG
+# PAGE CONFIG
 # -----------------------------------
 
-st.set_page_config(page_title="Financial AI Chatbot", layout="wide")
-st.title("📊 Financial News Sentiment Chatbot (FinBERT)")
+st.set_page_config(page_title="Financial AI Chatbot", page_icon="📊")
+st.title("📊 Financial Conversational AI (FinBERT Powered)")
 
 # -----------------------------------
-# ENTER YOUR NEWS API KEY HERE
+# API KEY
 # -----------------------------------
 
 NEWS_API_KEY = "YOUR_NEWSAPI_KEY"
 newsapi = NewsApiClient(api_key=NEWS_API_KEY)
 
 # -----------------------------------
-# LOAD FINBERT (Cached for performance)
+# LOAD FINBERT (Cached)
 # -----------------------------------
 
 @st.cache_resource
@@ -35,35 +35,25 @@ tokenizer, model = load_model()
 labels = ["negative", "neutral", "positive"]
 
 # -----------------------------------
-# SENTIMENT FUNCTION
+# FUNCTIONS
 # -----------------------------------
 
 def analyze_sentiment(text):
     inputs = tokenizer(text, return_tensors="pt", truncation=True)
     outputs = model(**inputs)
     probs = F.softmax(outputs.logits, dim=1)
-    
     sentiment_id = torch.argmax(probs).item()
     confidence = probs[0][sentiment_id].item()
-    
     return labels[sentiment_id], round(confidence, 3)
 
-# -----------------------------------
-# GET STOCK PRICE
-# -----------------------------------
 
 def get_stock_price(symbol):
     ticker = yf.Ticker(symbol.upper())
     data = ticker.history(period="1d")
-    
     if data.empty:
         return None
-    
     return round(data["Close"].iloc[-1], 2)
 
-# -----------------------------------
-# GET NEWS
-# -----------------------------------
 
 def get_financial_news(company):
     articles = newsapi.get_everything(
@@ -72,64 +62,73 @@ def get_financial_news(company):
         sort_by="publishedAt",
         page_size=5
     )
-    
     return articles["articles"]
 
-# -----------------------------------
-# USER INPUT
-# -----------------------------------
 
-user_input = st.text_input("Ask something (Example: price AAPL or news Tesla)")
+def generate_response(user_input):
+    user_input_lower = user_input.lower()
 
-if user_input:
-
-    # -------------------------------
-    # STOCK PRICE QUERY
-    # -------------------------------
-    if "price" in user_input.lower():
+    # STOCK PRICE
+    if "price" in user_input_lower:
         symbol = user_input.split()[-1]
         price = get_stock_price(symbol)
-
         if price:
-            st.success(f"💰 Current price of {symbol.upper()} is ${price}")
+            return f"💰 Current price of {symbol.upper()} is ${price}"
         else:
-            st.error("Stock symbol not found.")
+            return "❌ Stock symbol not found."
 
-    # -------------------------------
-    # NEWS + SENTIMENT QUERY
-    # -------------------------------
-    elif "news" in user_input.lower():
+    # NEWS + SENTIMENT
+    elif "news" in user_input_lower:
         company = user_input.replace("news", "").strip()
 
-        with st.spinner("Fetching news and analyzing sentiment..."):
-            articles = get_financial_news(company)
+        articles = get_financial_news(company)
+        if not articles:
+            return "⚠ No recent news found."
 
-            if not articles:
-                st.warning("No news found.")
-            else:
-                results = []
-                sentiments = []
+        sentiments = []
+        response_text = ""
 
-                for article in articles:
-                    title = article["title"]
-                    sentiment, confidence = analyze_sentiment(title)
+        for article in articles:
+            title = article["title"]
+            sentiment, confidence = analyze_sentiment(title)
+            sentiments.append(sentiment)
 
-                    sentiments.append(sentiment)
+            response_text += f"\n📰 {title}\n"
+            response_text += f"   Sentiment: {sentiment} (Confidence: {confidence})\n\n"
 
-                    results.append({
-                        "Title": title,
-                        "Sentiment": sentiment,
-                        "Confidence": confidence
-                    })
+        overall = max(set(sentiments), key=sentiments.count)
+        response_text += f"\n📈 Overall Market Sentiment: {overall.upper()}"
 
-                df = pd.DataFrame(results)
+        return response_text
 
-                # Overall Sentiment
-                overall = max(set(sentiments), key=sentiments.count)
+    return "Ask me about:\n- 'price AAPL'\n- 'news Tesla'"
 
-                st.subheader(f"📈 Overall Sentiment: {overall.upper()}")
+# -----------------------------------
+# CHAT MEMORY
+# -----------------------------------
 
-                st.dataframe(df, use_container_width=True)
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    else:
-        st.info("Please ask about stock price or financial news sentiment.")
+# Display previous messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if prompt := st.chat_input("Ask about stock price or financial news..."):
+
+    # Save user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Generate bot response
+    with st.chat_message("assistant"):
+        with st.spinner("Analyzing..."):
+            response = generate_response(prompt)
+            st.markdown(response)
+
+    # Save bot response
+    st.session_state.messages.append({"role": "assistant", "content": response})
