@@ -1,0 +1,9 @@
+streamlit
+yfinance
+newsapi-python
+transformers
+torch
+pandas
+numpy
+scikit-learn
+requests
